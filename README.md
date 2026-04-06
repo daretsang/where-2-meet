@@ -1,16 +1,28 @@
-# React + Vite
+# 📍 Where-2-Meet
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Finding a fair place to meet shouldn't be a math problem. **Where-2-Meet** is a geospatial web application designed to find the perfect overlapping travel zone for groups of friends and recommend customized Points of Interest (POIs) within that area. 
 
-Currently, two official plugins are available:
+By calculating real-time drive and transit isochrones (travel-time polygons) for up to 5 different starting locations, the app performs a spatial intersection in the browser to identify the optimal geographic center. It then queries a custom ArcGIS Online REST endpoint to suggest cafes, restaurants, parks, and more that fall strictly within that fair meeting zone.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## ✨ Key Features
 
-## React Compiler
+* **Live Geocoding & Autocomplete:** Search for any starting address using the Mapbox Geocoding API with live typing suggestions.
+* **Isochrone Routing:** Uses OpenRouteService to calculate accurate driving travel-zone polygons based on real road networks and a user-defined max travel time (5 - 30 minutes).
+* **In-Browser Spatial Analysis:** Leverages Turf.js to dynamically calculate the geometric intersection of multiple travel zones without needing a backend server.
+* **Custom POI Integration:** Queries a hosted ArcGIS Online Feature Layer using spatial relationships (`esriSpatialRelIntersects`) to fetch and render interactive venue data inside the meeting zone.
+* **Dynamic Cartography:** Interactive Mapbox GL JS map featuring dynamic legends, interactive hover states, and smooth UI transitions built with React and Tailwind CSS.
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## 🛠️ Tech Stack
 
-## Expanding the ESLint configuration
+* **Frontend Framework:** React (Vite)
+* **Styling:** Tailwind CSS
+* **Mapping Engine:** Mapbox GL JS (`react-map-gl`)
+* **Spatial Analysis:** Turf.js
+* **Routing API:** OpenRouteService (v2)
+* **Database / Feature Layer:** ArcGIS Online (AGOL) REST API
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+## 📝 Future Improvements
+
+* Integrate public transit routing
+* Add a "Share this Meeting Spot" feature to generate unique links for groups
+* Expand the dataset to include more information
