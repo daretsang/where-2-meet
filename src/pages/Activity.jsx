@@ -16,7 +16,7 @@ export default function Activity() {
     { name: 'Shopping', id: 'shopping_malls', icon: '🛍️' },
     { name: 'Beaches & Water', id: 'waterbodies', icon: '🏖️' },
     { name: 'Aquariums', id: 'aquarium', icon: '🐠' },
-    { name: 'Bike Trails', id: 'bike_trails', icon: '🚲' },
+    { name: 'Desserts and Bakeries', id: 'desserts_bakeries', icon: '🍰' },
     { name: 'Gyms & Rec', id: 'recreation_gyms', icon: '🏋️' },
     { name: 'Beauty', id: 'beauty', icon: '💅' },
     { name: 'Dog Parks', id: 'dog_parks', icon: '🐕' },

@@ -5,8 +5,7 @@
  * calculating travel time polygons (isochrones) via OpenRouteService, 
  * finding the geographic intersection using Turf.js, and finally fetching 
  * relevant Points of Interest (POIs) from an ArcGIS Online database
- * 
- * Last Updated: April 5, 2026
+ * * Last Updated: April 7, 2026
  * Authors: Darren Tsang, Mackenzie Thompson, Jeffrey Kim
  */
 
@@ -44,10 +43,19 @@ export default function MapView() {
   ]);
   const [travelTime, setTravelTime] = useState(10);
 
+  // State to track which person we are currently dropping a pin for
+  const [placingPersonId, setPlacingPersonId] = useState(null);
+
   // Map & Geospatial Data State
   const [intersectionPoly, setIntersectionPoly] = useState(null);
   const [individualPolygons, setIndividualPolygons] = useState([]);
   const [foundPlaces, setFoundPlaces] = useState([]);
+  
+  // State to track how many results are currently visible on the map
+  const [visiblePlacesCount, setVisiblePlacesCount] = useState(10);
+
+  // NEW: State to track if the results list is open in the sidebar
+  const [isListOpen, setIsListOpen] = useState(false);
 
   // UI Interaction & Hover State
   const [isSearching, setIsSearching] = useState(false);
@@ -76,6 +84,7 @@ export default function MapView() {
     if (people.length <= 2) return; // Must have at least 2 people to find a middle
     setPeople(people.filter(person => person.id !== idToRemove));
     clearResults(); // Invalidate the map if the participant list changes
+    if (placingPersonId === idToRemove) setPlacingPersonId(null); // Cancel pin drop if removed
   };
 
   const updatePerson = (id, field, value) => {
@@ -91,6 +100,8 @@ export default function MapView() {
     setIndividualPolygons([]);
     setFoundPlaces([]);
     setHoveredPlace(null);
+    setVisiblePlacesCount(10); // Reset the counter back to 10 whenever a new search happens
+    setIsListOpen(false); // NEW: Close the list when results are cleared
   };
 
   // =====================================================================
@@ -147,6 +158,17 @@ export default function MapView() {
     const data = await response.json();
     if (data.features && data.features.length > 0) return data.features[0].center;
     throw new Error(`Could not find: ${address}`);
+  };
+
+  // Reverse Geocoder (Translates Map Clicks into Readable Addresses)
+  const reverseGeocode = async (lng, lat) => {
+    const endpoint = `https://api.mapbox.com/geocoding/v5/mapbox.places/${lng},${lat}.json`;
+    const params = new URLSearchParams({ access_token: MAPBOX_TOKEN, limit: 1 });
+    const response = await fetch(`${endpoint}?${params}`);
+    const data = await response.json();
+    // Return the formatted place name, or a raw coordinate string if the ocean is clicked
+    if (data.features && data.features.length > 0) return data.features[0].place_name;
+    return `Dropped Pin (${lng.toFixed(4)}, ${lat.toFixed(4)})`; 
   };
 
   // Generates the travel boundary (Isochrone) for a specific user.
@@ -213,7 +235,16 @@ export default function MapView() {
       
       const data = await response.json();
       if (data.features) {
-        setFoundPlaces(data.features);
+        // Sort the fetched places by their distance to the dead-center of the overlap polygon!
+        const centerPoint = turf.centroid(overlapPolygon);
+        
+        const sortedPlaces = data.features.sort((a, b) => {
+          const distanceA = turf.distance(centerPoint, a);
+          const distanceB = turf.distance(centerPoint, b);
+          return distanceA - distanceB; // Closest items move to the top of the array
+        });
+
+        setFoundPlaces(sortedPlaces);
       }
     } catch (err) {
       console.error("Error fetching places:", err);
@@ -231,10 +262,11 @@ export default function MapView() {
     setErrorMsg('');
     clearResults();
     setIsLegendOpen(true); 
+    setPlacingPersonId(null); // Cancel any active pin dropping
     
     // Validation check
-    if (people.some(p => !p.address.trim())) {
-      setErrorMsg('Please enter an address for everyone first!');
+    if (people.some(p => !p.address.trim() && !p.coordinates)) {
+      setErrorMsg('Please enter an address or drop a pin for everyone first!');
       return;
     }
 
@@ -280,6 +312,37 @@ export default function MapView() {
     }
   };
 
+  // Handle Map Clicks for Dropping Pins
+  const handleMapClick = async (e) => {
+    // If we aren't in "drop pin mode", do nothing.
+    if (!placingPersonId) return;
+
+    const { lng, lat } = e.lngLat;
+    
+    // Set a temporary "Loading..." text so the user knows it registered
+    setPeople(people.map(person => 
+      person.id === placingPersonId 
+        ? { ...person, address: "Pinpointing location...", coordinates: [lng, lat], suggestions: [] } 
+        : person
+    ));
+
+    try {
+      const readableAddress = await reverseGeocode(lng, lat);
+      // Update the person with the new readable address and exact coordinates
+      setPeople(prev => prev.map(person => 
+        person.id === placingPersonId 
+          ? { ...person, address: readableAddress } 
+          : person
+      ));
+    } catch (err) {
+      console.error("Reverse geocode failed", err);
+    }
+
+    // Turn off "drop pin mode" and clear previous calculation results
+    setPlacingPersonId(null);
+    clearResults();
+  };
+
   // Emojis to symbolize points
   const getCategoryIcon = (category) => {
     const icons = { 
@@ -292,7 +355,7 @@ export default function MapView() {
       shopping_malls: '🛍️',
       waterbodies: '🏖️',
       aquarium: '🐠',
-      bike_trails: '🚲',
+      desserts_bakeries: '🍰',
       recreation_gyms: '🏋️',
       beauty: '💅',
       dog_parks: '🐕',
@@ -301,6 +364,9 @@ export default function MapView() {
     };
     return icons[category] || '📍';
   };
+
+  // Slice the array to only contain the number of places we want to show
+  const displayedPlaces = foundPlaces.slice(0, visiblePlacesCount);
 
   // =====================================================================
   // RENDER UI
@@ -334,35 +400,58 @@ export default function MapView() {
           </div>
           
           <div className="space-y-4">
-            {people.map((person, index) => (
-              <div key={person.id} className="p-3 bg-slate-50 border-2 rounded-xl relative transition-colors" style={{ borderColor: individualPolygons.length > 0 ? colors[index] : '#e2e8f0' }}>
-                <div className="flex justify-between items-center mb-2">
-                  <input type="text" value={person.name} onChange={(e) => updatePerson(person.id, 'name', e.target.value)} className="text-sm font-bold text-slate-700 bg-transparent border-b border-dashed border-slate-300 focus:border-blue-500 hover:border-blue-400 focus:outline-none transition px-1 w-1/2" />
-                  {people.length > 2 && (
-                    <button onClick={() => removePerson(person.id)} className="text-red-400 hover:text-red-600 text-xs font-semibold px-2 py-1 rounded hover:bg-red-50 transition">Remove</button>
-                  )}
-                </div>
-                <div className="flex gap-2 relative">
-                  <div className="flex-1 relative">
-                    <input type="text" placeholder="Search address..." value={person.address} onChange={(e) => handleAddressChange(person.id, e.target.value)} className="w-full p-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm" />
-                    {person.suggestions.length > 0 && (
-                      <ul className="absolute left-0 right-0 top-full mt-1 bg-white border border-slate-200 shadow-lg rounded-lg overflow-hidden z-50">
-                        {person.suggestions.map((feature) => (
-                          <li key={feature.id} onClick={() => selectSuggestion(person.id, feature)} className="p-3 text-sm text-slate-700 hover:bg-blue-50 cursor-pointer border-b border-slate-100 last:border-b-0">
-                            <div className="font-semibold text-slate-900 truncate">{feature.text}</div>
-                            <div className="text-xs text-slate-500 truncate">{feature.place_name.replace(`${feature.text}, `, '')}</div>
-                          </li>
-                        ))}
-                      </ul>
+            {people.map((person, index) => {
+              const isPlacing = placingPersonId === person.id;
+              
+              return (
+                <div key={person.id} className="p-3 bg-slate-50 border-2 rounded-xl relative transition-colors" style={{ borderColor: individualPolygons.length > 0 ? colors[index] : '#e2e8f0' }}>
+                  <div className="flex justify-between items-center mb-2">
+                    <input type="text" value={person.name} onChange={(e) => updatePerson(person.id, 'name', e.target.value)} className="text-sm font-bold text-slate-700 bg-transparent border-b border-dashed border-slate-300 focus:border-blue-500 hover:border-blue-400 focus:outline-none transition px-1 w-1/2" />
+                    {people.length > 2 && (
+                      <button onClick={() => removePerson(person.id)} className="text-red-400 hover:text-red-600 text-xs font-semibold px-2 py-1 rounded hover:bg-red-50 transition">Remove</button>
                     )}
                   </div>
-                  <select value={person.mode} onChange={(e) => updatePerson(person.id, 'mode', e.target.value)} className="p-2 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm cursor-pointer h-10">
-                    <option value="driving">🚗 Drive</option>
-                    <option value="transit">🚌 Transit</option>
-                  </select>
+                  <div className="flex gap-2 relative">
+                    {/* Input wrapper modified to include the Pin Button */}
+                    <div className="flex-1 relative flex items-center">
+                      <input 
+                        type="text" 
+                        placeholder={isPlacing ? "Click anywhere on the map..." : "Search address..."} 
+                        value={person.address} 
+                        onChange={(e) => handleAddressChange(person.id, e.target.value)} 
+                        // Highlight the input box blue if they are currently dropping a pin
+                        className={`w-full p-2 pr-10 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm transition-colors ${isPlacing ? 'bg-blue-100 border-blue-400 text-blue-800 font-medium' : 'border-slate-300'}`} 
+                        disabled={isPlacing} // Disable typing while placing a pin
+                      />
+                      
+                      {/* Drop Pin Button sitting inside the right edge of the text input */}
+                      <button 
+                        onClick={() => setPlacingPersonId(isPlacing ? null : person.id)}
+                        className={`absolute right-2 text-lg hover:scale-110 transition-transform ${isPlacing ? 'drop-shadow-md' : 'opacity-60 hover:opacity-100'}`}
+                        title={isPlacing ? "Cancel dropping pin" : "Drop a pin on the map"}
+                      >
+                        {isPlacing ? '❌' : '📍'}
+                      </button>
+
+                      {person.suggestions.length > 0 && !isPlacing && (
+                        <ul className="absolute left-0 right-0 top-full mt-1 bg-white border border-slate-200 shadow-lg rounded-lg overflow-hidden z-50">
+                          {person.suggestions.map((feature) => (
+                            <li key={feature.id} onClick={() => selectSuggestion(person.id, feature)} className="p-3 text-sm text-slate-700 hover:bg-blue-50 cursor-pointer border-b border-slate-100 last:border-b-0">
+                              <div className="font-semibold text-slate-900 truncate">{feature.text}</div>
+                              <div className="text-xs text-slate-500 truncate">{feature.place_name.replace(`${feature.text}, `, '')}</div>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                    <select value={person.mode} onChange={(e) => updatePerson(person.id, 'mode', e.target.value)} className="p-2 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm cursor-pointer h-10">
+                      <option value="driving">🚗 Drive</option>
+                      <option value="transit">🚌 Transit</option>
+                    </select>
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
 
           {people.length < 5 && (
@@ -378,6 +467,85 @@ export default function MapView() {
           <button onClick={handleFindMiddle} disabled={isSearching} className={`w-full text-white font-bold py-4 rounded-xl transition shadow-md ${isSearching ? 'bg-blue-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'}`}>
             {isSearching ? 'Calculating Zone...' : 'Find the Middle'}
           </button>
+
+          {/* Pagination Controls */}
+          {foundPlaces.length > 0 && (
+            <div className="mt-4 pt-4 border-t border-slate-100">
+              <p className="text-sm font-semibold text-slate-700 mb-3 text-center">
+                Displaying <span className="text-blue-600 font-bold">{displayedPlaces.length}</span> of <span className="font-bold">{foundPlaces.length}</span> results
+              </p>
+              
+              <div className="flex flex-col gap-2">
+                <div className="flex gap-2">
+                  {/* Show Less Button */}
+                  {visiblePlacesCount > 10 && (
+                    <button 
+                      onClick={() => setVisiblePlacesCount(prev => Math.max(10, prev - 10))}
+                      className="flex-1 py-2 bg-slate-100 text-slate-600 text-sm font-bold rounded-lg hover:bg-slate-200 transition shadow-sm"
+                    >
+                      - Show Less
+                    </button>
+                  )}
+                  
+                  {/* Show 10 More Button */}
+                  {visiblePlacesCount < foundPlaces.length && (
+                    <button 
+                      onClick={() => setVisiblePlacesCount(prev => prev + 10)}
+                      className="flex-1 py-2 bg-blue-50 text-blue-600 text-sm font-bold rounded-lg hover:bg-blue-100 transition shadow-sm"
+                    >
+                      + Show 10 More
+                    </button>
+                  )}
+                </div>
+                
+                {/* Show All Button */}
+                {visiblePlacesCount < foundPlaces.length && (
+                  <button 
+                    onClick={() => setVisiblePlacesCount(foundPlaces.length)}
+                    className="w-full py-2 bg-slate-100 text-slate-600 text-sm font-bold rounded-lg hover:bg-slate-200 transition shadow-sm"
+                  >
+                    Show All
+                  </button>
+                )}
+              </div>
+
+              {/* NEW: COLLAPSIBLE LIST OF PLACES */}
+              <div className="mt-4 border-t border-slate-100 pt-3">
+                <button 
+                  onClick={() => setIsListOpen(!isListOpen)}
+                  className="w-full flex justify-between items-center text-sm font-bold text-slate-700 hover:text-blue-600 transition"
+                >
+                  <span>📋 {isListOpen ? 'Hide' : 'View'} List of Places</span>
+                  <span className="text-lg">{isListOpen ? '▴' : '▾'}</span>
+                </button>
+
+                {isListOpen && (
+                  <div className="mt-3 max-h-64 overflow-y-auto pr-1 space-y-2">
+                    {displayedPlaces.map((place, idx) => (
+                      <div 
+                        key={`list-item-${idx}`}
+                        className="p-3 bg-white border border-slate-200 rounded-lg shadow-sm hover:border-blue-400 hover:shadow-md transition cursor-pointer flex gap-3 items-center"
+                        // Magic Trick: Hovering the list item triggers the map popup!
+                        onMouseEnter={() => setHoveredPlace(place)}
+                        onMouseLeave={() => setHoveredPlace(null)}
+                      >
+                        <div className="text-2xl">{getCategoryIcon(place.properties.category)}</div>
+                        <div className="flex-1 min-w-0">
+                          <h4 className="text-sm font-bold text-slate-900 truncate">{place.properties.name}</h4>
+                          <p className="text-xs text-blue-600 font-semibold capitalize truncate">{place.properties.category.replace(/_/g, ' ')}</p>
+                          {place.properties.wheelchair === 'yes' && (
+                            <p className="text-[10px] text-green-600 font-bold mt-1 uppercase tracking-wider">♿ Accessible</p>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+            </div>
+          )}
+
         </div>
       </div>
 
@@ -387,6 +555,9 @@ export default function MapView() {
           mapboxAccessToken={MAPBOX_TOKEN}
           initialViewState={{ longitude: -123.1, latitude: 49.25, zoom: 10 }}
           mapStyle="mapbox://styles/mapbox/streets-v12"
+          // Changes cursor to crosshair and listens for clicks when a pin is being dropped
+          cursor={placingPersonId ? 'crosshair' : 'grab'}
+          onClick={handleMapClick}
         >
           {individualPolygons.map((poly, index) => (
             <Source key={`source-indiv-${index}`} type="geojson" data={poly}>
@@ -410,7 +581,7 @@ export default function MapView() {
             person.coordinates && (
               <Marker key={`marker-${person.id}`} longitude={person.coordinates[0]} latitude={person.coordinates[1]} anchor="bottom">
                 <div 
-                  className="text-4xl drop-shadow-md cursor-pointer hover:scale-110 transition-transform"
+                  className={`text-4xl drop-shadow-md cursor-pointer transition-transform ${placingPersonId === person.id ? 'animate-bounce' : 'hover:scale-110'}`}
                   onMouseEnter={() => setHoveredMarker(person)}
                   onMouseLeave={() => setHoveredMarker(null)}
                 >
@@ -420,7 +591,8 @@ export default function MapView() {
             )
           ))}
 
-          {foundPlaces.map((place, idx) => (
+          {/* We now map over `displayedPlaces` instead of `foundPlaces`! */}
+          {displayedPlaces.map((place, idx) => (
             <Marker 
               key={`place-${idx}`} 
               longitude={place.geometry.coordinates[0]} 
@@ -470,37 +642,40 @@ export default function MapView() {
 
         {/* Legend */}
         {individualPolygons.length > 0 && (
-          <div className="absolute bottom-8 right-8 z-10 flex flex-col items-end">
-            {isLegendOpen ? (
-              <div className="bg-white/95 backdrop-blur-sm p-5 rounded-2xl shadow-xl border border-slate-200 w-64 relative animate-in fade-in zoom-in-95 duration-200">
-                <button onClick={() => setIsLegendOpen(false)} className="absolute top-3 right-4 text-slate-400 hover:text-slate-700 transition"><span className="text-xl font-bold leading-none">&times;</span></button>
-                <h3 className="font-extrabold text-slate-800 mb-3 border-b border-slate-100 pb-2">Map Legend</h3>
-                <div className="space-y-3">
-                  {people.map((person, i) => (
-                    person.coordinates && individualPolygons[i] && (
-                      <div key={person.id} className="flex items-center gap-3">
-                        <div className="w-5 h-5 rounded-md border border-slate-300 shadow-inner" style={{ backgroundColor: colors[i], opacity: 0.6 }}></div>
-                        <span className="text-slate-600 text-sm font-medium">{person.name} <span className="text-slate-400 text-xs">({travelTime}m {person.mode === 'driving' ? 'Drive' : 'Transit'})</span></span>
-                      </div>
-                    )
-                  ))}
+          <div className="absolute bottom-8 right-8 z-10 flex flex-col items-end pointer-events-none">
+            <div className="pointer-events-auto">
+              {isLegendOpen ? (
+                <div className="bg-white/95 backdrop-blur-sm p-5 rounded-2xl shadow-xl border border-slate-200 w-64 relative animate-in fade-in zoom-in-95 duration-200">
+                  <button onClick={() => setIsLegendOpen(false)} className="absolute top-3 right-4 text-slate-400 hover:text-slate-700 transition"><span className="text-xl font-bold leading-none">&times;</span></button>
+                  <h3 className="font-extrabold text-slate-800 mb-3 border-b border-slate-100 pb-2">Map Legend</h3>
+                  <div className="space-y-3">
+                    {people.map((person, i) => (
+                      person.coordinates && individualPolygons[i] && (
+                        <div key={person.id} className="flex items-center gap-3">
+                          <div className="w-5 h-5 rounded-md border border-slate-300 shadow-inner" style={{ backgroundColor: colors[i], opacity: 0.6 }}></div>
+                          <span className="text-slate-600 text-sm font-medium">{person.name} <span className="text-slate-400 text-xs">({travelTime}m {person.mode === 'driving' ? 'Drive' : 'Transit'})</span></span>
+                        </div>
+                      )
+                    ))}
+                  </div>
+                  {intersectionPoly && (
+                    <div className="mt-4 pt-3 border-t border-slate-100 flex items-center gap-3">
+                      <div className="w-5 h-5 rounded-md border border-slate-300 shadow-inner" style={{ backgroundColor: '#1e3a8a', opacity: 0.8 }}></div>
+                      <span className="text-slate-900 text-sm font-bold">The Middle Area</span>
+                    </div>
+                  )}
+                  {foundPlaces.length > 0 && (
+                    <div className="mt-2 pt-3 border-t border-slate-100 flex items-center gap-3">
+                      <div className="text-lg">📍</div>
+                      {/* Updated Legend text to reflect how many are shown */}
+                      <span className="text-slate-900 text-sm font-bold">{displayedPlaces.length} of {foundPlaces.length} Places Shown</span>
+                    </div>
+                  )}
                 </div>
-                {intersectionPoly && (
-                  <div className="mt-4 pt-3 border-t border-slate-100 flex items-center gap-3">
-                    <div className="w-5 h-5 rounded-md border border-slate-300 shadow-inner" style={{ backgroundColor: '#1e3a8a', opacity: 0.8 }}></div>
-                    <span className="text-slate-900 text-sm font-bold">The Middle Area</span>
-                  </div>
-                )}
-                {foundPlaces.length > 0 && (
-                  <div className="mt-2 pt-3 border-t border-slate-100 flex items-center gap-3">
-                    <div className="text-lg">📍</div>
-                    <span className="text-slate-900 text-sm font-bold">{foundPlaces.length} Places Found</span>
-                  </div>
-                )}
-              </div>
-            ) : (
-              <button onClick={() => setIsLegendOpen(true)} className="bg-white/95 backdrop-blur-sm px-4 py-3 rounded-xl shadow-lg border border-slate-200 text-slate-700 font-bold hover:bg-blue-50 transition hover:shadow-xl animate-in fade-in zoom-in-95">🗺️ Show Legend</button>
-            )}
+              ) : (
+                <button onClick={() => setIsLegendOpen(true)} className="bg-white/95 backdrop-blur-sm px-4 py-3 rounded-xl shadow-lg border border-slate-200 text-slate-700 font-bold hover:bg-blue-50 transition hover:shadow-xl animate-in fade-in zoom-in-95">🗺️ Show Legend</button>
+              )}
+            </div>
           </div>
         )}
 
