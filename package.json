@@ -10,13 +10,13 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@arcgis/core": "^5.0.16",
+    "@arcgis/map-components": "^5.0.16",
     "@tailwindcss/vite": "^4.2.2",
     "@turf/turf": "^7.3.4",
     "@vercel/analytics": "^2.0.1",
-    "mapbox-gl": "^3.20.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
-    "react-map-gl": "^8.1.0",
     "react-router-dom": "^7.13.2",
     "tailwindcss": "^4.2.2"
   },
