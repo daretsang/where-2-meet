@@ -122,6 +122,16 @@ export default function MapViewComponent() {
       }
     });
 
+    const allPOILayer = new FeatureLayer({
+      url: "https://services1.arcgis.com/KsnB2VOAvO5LjdB4/arcgis/rest/services/lower_mainland_poi_filtered/FeatureServer",
+      title: "All Points of Interest",
+      visible: false, // Keeps the map clean until the user toggles it on
+      popupTemplate: {
+        title: "POI Information",
+        content: [{ type: "fields" }] 
+      }
+    });
+
     const map = new Map({
       basemap: "streets-navigation-vector" 
     });
@@ -131,6 +141,7 @@ export default function MapViewComponent() {
     map.add(markersLayerRef.current);
     map.add(placesLayerRef.current);
     map.add(bikeRoutesLayer);
+    map.add(allPOILayer);
 
     const view = new MapView({
       container: mapDiv.current,
