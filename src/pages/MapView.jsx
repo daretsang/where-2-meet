@@ -17,6 +17,9 @@ import Graphic from '@arcgis/core/Graphic';
 import GraphicsLayer from '@arcgis/core/layers/GraphicsLayer';
 import * as reactiveUtils from "@arcgis/core/core/reactiveUtils"; 
 import Home from "@arcgis/core/widgets/Home";
+import FeatureLayer from '@arcgis/core/layers/FeatureLayer';
+import LayerList from '@arcgis/core/widgets/LayerList';
+import Expand from '@arcgis/core/widgets/Expand';
 import "@arcgis/core/assets/esri/themes/light/main.css";
 
 export default function MapViewComponent() {
@@ -104,10 +107,20 @@ export default function MapViewComponent() {
 
     esriConfig.apiKey = ARCGIS_API_KEY;
 
-    isochroneLayerRef.current = new GraphicsLayer();
-    intersectionLayerRef.current = new GraphicsLayer();
-    markersLayerRef.current = new GraphicsLayer();
-    placesLayerRef.current = new GraphicsLayer();
+    isochroneLayerRef.current = new GraphicsLayer({ listMode: "hide" });
+    intersectionLayerRef.current = new GraphicsLayer({ listMode: "hide" });
+    markersLayerRef.current = new GraphicsLayer({ listMode: "hide" });
+    placesLayerRef.current = new GraphicsLayer({ listMode: "hide" });
+
+    const bikeRoutesLayer = new FeatureLayer({
+      url: "https://services1.arcgis.com/KsnB2VOAvO5LjdB4/arcgis/rest/services/bike_routes_lower_mainland/FeatureServer",
+      title: "Lower Mainland Bike Routes",
+      visible: false,
+      popupTemplate: {
+        title: "Route Information",
+        content: [{ type: "fields" }] 
+      }
+    });
 
     const map = new Map({
       basemap: "streets-navigation-vector" 
@@ -117,6 +130,7 @@ export default function MapViewComponent() {
     map.add(intersectionLayerRef.current);
     map.add(markersLayerRef.current);
     map.add(placesLayerRef.current);
+    map.add(bikeRoutesLayer);
 
     const view = new MapView({
       container: mapDiv.current,
@@ -129,6 +143,20 @@ export default function MapViewComponent() {
 
     const homeWidget = new Home({ view: view });
     view.ui.add(homeWidget, "top-left");
+
+    const layerList = new LayerList({ 
+      view: view 
+    });
+
+    const layerListExpand = new Expand({
+      view: view,
+      content: layerList,
+      expandIcon: "layers",
+      expandTooltip: "Toggle Map Layers",
+      expanded: false
+    });
+
+    view.ui.add(layerListExpand, "bottom-left");
 
     view.on("click", async (event) => {
       if (placingPersonIdRef.current) {
@@ -620,8 +648,8 @@ export default function MapViewComponent() {
   const getCategoryIcon = (category) => {
     const icons = { 
       cafes: '☕', restaurants: '🍔', parks: '🌳', museums: '🏛️', libraries: '📚', 
-      art_galleries: '🎨', shopping_malls: '🛍️', waterbodies: '🏖️', aquarium: '🐠', 
-      desserts_bakeries: '🍰', recreation_gyms: '🏋️', beauty: '💅', dog_parks: '🐕', 
+      art_galleries: '🎨', shopping_malls: '🛍️', waterbodies: '🏖️', cinemas_and_theatres: '🎟️', 
+      desserts_and_bakeries: '🍰', recreation_gyms: '🏋️', beauty: '💅', dog_parks: '🐕', 
       nightlife: '🍻', niche_fun: '🎯'
     };
     return icons[category] || '📍';
@@ -721,7 +749,7 @@ export default function MapViewComponent() {
               <span className="text-sm font-bold text-blue-700 bg-blue-200 px-2 py-1 rounded-md">{travelTime} mins</span>
             </div>
             <input 
-              type="range" min="5" max="30" step="5" value={travelTime} 
+              type="range" min="5" max="45" step="5" value={travelTime} 
               onChange={(e) => {
                 setTravelTime(parseInt(e.target.value));
                 clearResults();
@@ -729,7 +757,7 @@ export default function MapViewComponent() {
               className="w-full h-2 bg-blue-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
             />
             <div className="flex justify-between text-xs text-blue-400 mt-1 font-semibold">
-              <span>5m</span><span>30m</span>
+              <span>5m</span><span>45m</span>
             </div>
           </div>
           
