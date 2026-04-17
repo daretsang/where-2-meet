@@ -9,17 +9,17 @@ import { useState, useEffect, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import * as turf from '@turf/turf';
 
-// ArcGIS Core Imports
+// ArcGIS Imports
 import esriConfig from '@arcgis/core/config';
 import Map from '@arcgis/core/Map';
 import MapView from '@arcgis/core/views/MapView';
 import Graphic from '@arcgis/core/Graphic';
 import GraphicsLayer from '@arcgis/core/layers/GraphicsLayer';
 import * as reactiveUtils from "@arcgis/core/core/reactiveUtils"; 
-import Home from "@arcgis/core/widgets/Home";
 import FeatureLayer from '@arcgis/core/layers/FeatureLayer';
-import LayerList from '@arcgis/core/widgets/LayerList';
-import Expand from '@arcgis/core/widgets/Expand';
+import "@arcgis/map-components/components/arcgis-layer-list";
+import "@arcgis/map-components/components/arcgis-expand";
+import "@arcgis/map-components/components/arcgis-home";
 import "@arcgis/core/assets/esri/themes/light/main.css";
 
 export default function MapViewComponent() {
@@ -62,7 +62,6 @@ export default function MapViewComponent() {
   const [isLegendOpen, setIsLegendOpen] = useState(true);
   const [isListOpen, setIsListOpen] = useState(false);
 
-  // NEW: Added address, lat, and lng to the tooltip state
   const [tooltip, setTooltip] = useState({ 
     show: false, 
     x: 0, y: 0, 
@@ -92,6 +91,20 @@ export default function MapViewComponent() {
   const cssColors = ['#ef4444', '#10b981', '#f59e0b', '#8b5cf6', '#06b6d4'];
 
   // =====================================================================
+  // HELPER FUNCTIONS
+  // =====================================================================
+
+  // Safely convert GeoJSON Polygon/MultiPolygon coordinates to Esri Rings
+  const getEsriRings = (geojsonGeometry) => {
+    if (geojsonGeometry.type === 'MultiPolygon') {
+      let rings = [];
+      geojsonGeometry.coordinates.forEach(poly => rings.push(...poly));
+      return rings;
+    }
+    return geojsonGeometry.coordinates; 
+  };
+
+  // =====================================================================
   // ARCGIS MAP INITIALIZATION & REFS
   // =====================================================================
   const mapDiv = useRef(null);
@@ -107,28 +120,32 @@ export default function MapViewComponent() {
 
     esriConfig.apiKey = ARCGIS_API_KEY;
 
+    // Hide internal app layers from the LayerList
     isochroneLayerRef.current = new GraphicsLayer({ listMode: "hide" });
     intersectionLayerRef.current = new GraphicsLayer({ listMode: "hide" });
     markersLayerRef.current = new GraphicsLayer({ listMode: "hide" });
     placesLayerRef.current = new GraphicsLayer({ listMode: "hide" });
 
+    // Reference Layers
     const bikeRoutesLayer = new FeatureLayer({
-      url: "https://services1.arcgis.com/KsnB2VOAvO5LjdB4/arcgis/rest/services/bike_routes_lower_mainland/FeatureServer",
+      url: "https://services1.arcgis.com/KsnB2VOAvO5LjdB4/arcgis/rest/services/bike_routes_lower_mainland/FeatureServer/1",
       title: "Lower Mainland Bike Routes",
       visible: false,
+      outFields: ["name"],
       popupTemplate: {
-        title: "Route Information",
-        content: [{ type: "fields" }] 
+        title: "{name}",
+        content: "Bike Route"
       }
     });
 
     const allPOILayer = new FeatureLayer({
-      url: "https://services1.arcgis.com/KsnB2VOAvO5LjdB4/arcgis/rest/services/lower_mainland_poi_filtered/FeatureServer",
+      url: "https://services1.arcgis.com/KsnB2VOAvO5LjdB4/arcgis/rest/services/lower_mainland_poi_filtered/FeatureServer/2",
       title: "All Points of Interest",
-      visible: false, // Keeps the map clean until the user toggles it on
+      visible: false,
+      outFields: ["name", "category"],
       popupTemplate: {
-        title: "POI Information",
-        content: [{ type: "fields" }] 
+        title: "{name}",
+        content: "{category}" 
       }
     });
 
@@ -152,30 +169,37 @@ export default function MapViewComponent() {
 
     viewRef.current = view;
 
-    const homeWidget = new Home({ view: view });
+    // UI Widgets
+    const homeWidget = document.createElement("arcgis-home");
+    homeWidget.view = view;
     view.ui.add(homeWidget, "top-left");
 
-    const layerList = new LayerList({ 
-      view: view 
-    });
+    // NEW: Create the Web Component Layer List
+    const layerListComponent = document.createElement("arcgis-layer-list");
+    layerListComponent.view = view;
 
-    const layerListExpand = new Expand({
-      view: view,
-      content: layerList,
-      expandIcon: "layers",
-      expandTooltip: "Toggle Map Layers",
-      expanded: false
-    });
+    // NEW: Create the Web Component Expand Button
+    const expandComponent = document.createElement("arcgis-expand");
+    expandComponent.view = view;
+    expandComponent.expandIcon = "layers";
+    expandComponent.expandTooltip = "Toggle Map Layers";
 
-    view.ui.add(layerListExpand, "bottom-left");
+    // Drop the Layer List inside the Expand button
+    expandComponent.appendChild(layerListComponent);
 
+    // Add the whole package to the bottom-left corner
+    view.ui.add(expandComponent, "bottom-left");
+
+    // Event Listeners
     view.on("click", async (event) => {
       if (placingPersonIdRef.current) {
         handleMapClick(placingPersonIdRef.current, event.mapPoint.longitude, event.mapPoint.latitude);
         return; 
       }
 
-      const response = await view.hitTest(event);
+      const response = await view.hitTest(event, { 
+      include: [markersLayerRef.current, placesLayerRef.current] 
+      });
       const graphicHit = response.results.find(
         (r) => r.graphic.layer === markersLayerRef.current || r.graphic.layer === placesLayerRef.current
       );
@@ -192,7 +216,7 @@ export default function MapViewComponent() {
           title: isPerson ? `${graphic.attributes.name}'s Location` : graphic.attributes.name,
           subtitle: isPerson ? `Mode: ${graphic.attributes.mode}` : graphic.attributes.category.replace(/_/g, ' '),
           isPlace: !isPerson,
-          address: graphic.attributes.address || graphic.attributes.Address || '', // Catch uppercase A just in case
+          address: graphic.attributes.address || graphic.attributes.Address || '', 
           lat: graphic.geometry.latitude,
           lng: graphic.geometry.longitude,
           website: graphic.attributes.website,
@@ -212,7 +236,9 @@ export default function MapViewComponent() {
         return;
       }
 
-      const response = await view.hitTest(event);
+      const response = await view.hitTest(event, { 
+      include: [markersLayerRef.current, placesLayerRef.current] 
+      });
       const graphicHit = response.results.find(
         (r) => r.graphic.layer === markersLayerRef.current || r.graphic.layer === placesLayerRef.current
       );
@@ -304,7 +330,7 @@ export default function MapViewComponent() {
       const graphic = new Graphic({
         geometry: {
           type: "polygon",
-          rings: poly.geometry.coordinates,
+          rings: getEsriRings(poly.geometry),
           spatialReference: { wkid: 4326 }
         },
         symbol: {
@@ -321,7 +347,7 @@ export default function MapViewComponent() {
       const graphic = new Graphic({
         geometry: {
           type: "polygon",
-          rings: intersectionPoly.geometry.coordinates,
+          rings: getEsriRings(intersectionPoly.geometry),
           spatialReference: { wkid: 4326 }
         },
         symbol: {
@@ -378,7 +404,7 @@ export default function MapViewComponent() {
 
 
   // =====================================================================
-  // HELPER FUNCTIONS
+  // STATE MANAGEMENT / HANDLERS
   // =====================================================================
   
   const addPerson = () => {
@@ -557,6 +583,11 @@ export default function MapViewComponent() {
           locations: [[coordinates[0], coordinates[1]]], range: [time * 60] 
         })
       });
+
+      if (!response.ok) {
+        throw new Error(`Routing API Error: Please wait a moment and try again.`);
+      }
+
       const data = await response.json();
       if (data.error) throw new Error(data.error.message || "Routing API error.");
       return data.features[0]; 
@@ -567,10 +598,10 @@ export default function MapViewComponent() {
   };
 
   const fetchPlacesFromArcGIS = async (overlapPolygon) => {
-    if (!ARCGIS_URL) return;
+    if (!ARCGIS_URL) throw new Error("Database URL is missing!");
 
     const esriGeometry = {
-      rings: overlapPolygon.geometry.coordinates,
+      rings: getEsriRings(overlapPolygon.geometry),
       spatialReference: { wkid: 4326 }
     };
 
@@ -594,6 +625,8 @@ export default function MapViewComponent() {
       });
       
       const data = await response.json();
+      if (data.error) throw new Error(data.error.message);
+
       if (data.features) {
         const centerPoint = turf.centroid(overlapPolygon);
         const sortedPlaces = data.features.sort((a, b) => {
@@ -605,6 +638,7 @@ export default function MapViewComponent() {
       }
     } catch (err) {
       console.error("Error fetching places:", err);
+      throw new Error("Found the middle, but failed to load the places database.");
     }
   };
 
@@ -637,9 +671,14 @@ export default function MapViewComponent() {
       setIndividualPolygons(polygons);
 
       let overlap = polygons[0];
-      for (let i = 1; i < polygons.length; i++) {
-        overlap = turf.intersect(turf.featureCollection([overlap, polygons[i]]));
-        if (!overlap) break;
+      try {
+        for (let i = 1; i < polygons.length; i++) {
+          overlap = turf.intersect(turf.featureCollection([overlap, polygons[i]]));
+          if (!overlap) break;
+        }
+      } catch (mathError) {
+        console.error("Turf geometry error:", mathError);
+        throw new Error("The travel zones are too complex to intersect. Try moving a starting location slightly.");
       }
 
       if (!overlap) {
@@ -877,14 +916,14 @@ export default function MapViewComponent() {
                 onClick={() => setTooltip({ show: false })} 
                 className="absolute top-2 right-2.5 text-slate-400 hover:text-slate-800 text-xl leading-none transition-colors"
               >
-                &times;
+                ×
               </button>
             )}
 
             <div className={`font-bold text-sm leading-tight ${tooltip.pinned ? 'pr-6' : ''}`}>{tooltip.title}</div>
             <div className="text-xs font-semibold text-blue-600 capitalize mt-0.5">{tooltip.subtitle}</div>
             
-            {/* NEW: Render Address String */}
+            {/* Render Address String */}
             {tooltip.isPlace && tooltip.address && (
               <div className="text-xs text-slate-500 mt-1 leading-snug">{tooltip.address}</div>
             )}
@@ -898,7 +937,7 @@ export default function MapViewComponent() {
                   </div>
                 )}
                 
-                {/* NEW: Google Maps Coordinate URL */}
+                {/* Google Maps Coordinate URL */}
                 <div className="text-xs text-slate-600 flex items-center gap-1.5">
                   📍 <a href={`https://www.google.com/maps/search/?api=1&query=${tooltip.lat},${tooltip.lng}`} target="_blank" rel="noreferrer" className="text-blue-500 hover:underline">Open in Google Maps</a>
                 </div>
@@ -919,7 +958,7 @@ export default function MapViewComponent() {
             <div className="pointer-events-auto">
               {isLegendOpen ? (
                 <div className="bg-white/95 backdrop-blur-sm p-5 rounded-2xl shadow-xl border border-slate-200 w-72 sm:w-80 relative animate-in fade-in zoom-in-95 duration-200">
-                  <button onClick={() => setIsLegendOpen(false)} className="absolute top-3 right-4 text-slate-400 hover:text-slate-700 transition"><span className="text-xl font-bold leading-none">&times;</span></button>
+                  <button onClick={() => setIsLegendOpen(false)} className="absolute top-3 right-4 text-slate-400 hover:text-slate-700 transition"><span className="text-xl font-bold leading-none">×</span></button>
                   <h3 className="font-extrabold text-slate-800 mb-3 border-b border-slate-100 pb-2">Map Legend</h3>
                   
                   <div className="space-y-3">

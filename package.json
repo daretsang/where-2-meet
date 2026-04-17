@@ -11,7 +11,7 @@
   },
   "dependencies": {
     "@arcgis/core": "^5.0.16",
-    "@arcgis/map-components": "^5.0.16",
+    "@arcgis/map-components": "^5.0.17",
     "@tailwindcss/vite": "^4.2.2",
     "@turf/turf": "^7.3.4",
     "@vercel/analytics": "^2.0.1",
