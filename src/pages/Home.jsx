@@ -4,10 +4,10 @@ export default function Home() {
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-6">
       <h1 className="text-4xl md:text-6xl font-extrabold text-slate-900 text-center mb-4 tracking-tight">
-        Meet in the Middle
+        Where 2 Meet
       </h1>
       <p className="text-lg text-slate-600 text-center mb-8 max-w-md">
-        Find the perfect halfway point for you and your friends to hang out, whether you're driving or taking transit.
+        Find the perfect halfway point for you and your friends to hang out, whether you're driving, biking, or taking transit.
       </p>
       <Link
         to="/activity"
